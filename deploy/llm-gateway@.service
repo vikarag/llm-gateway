@@ -1,0 +1,25 @@
+[Unit]
+Description=llm-gateway — shared OpenAI-compatible LLM proxy with live provider routing
+After=network-online.target tailscaled.service
+Wants=network-online.target tailscaled.service
+# Restarts must never be permanently disabled by the default start limit.
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+# Template unit: %i is the unix user that owns the checkout.
+User=%i
+WorkingDirectory=/home/%i/llm-gateway
+ExecStart=/usr/bin/python3 /home/%i/llm-gateway/gateway.py
+Restart=always
+RestartSec=3
+Environment=GATEWAY_PORT=9302
+Environment=PYTHONUNBUFFERED=1
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=/home/%i/.local/state/llm-gateway
+
+[Install]
+WantedBy=multi-user.target

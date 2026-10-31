@@ -1,0 +1,16 @@
+{
+  "deepseek/deepseek-v4.1-flash-1017": {
+    "only": [
+      "morph/fp8",
+      "deepinfra/fp8",
+      "inference-net/fp8",
+      "streamlake/fp8"
+    ],
+    "order": [
+      "morph/fp8",
+      "deepinfra/fp8",
+      "inference-net/fp8",
+      "streamlake/fp8"
+    ]
+  }
+}
