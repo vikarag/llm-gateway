@@ -193,44 +193,49 @@ class RoutingTable:
 
     @staticmethod
     def _parse_fallback(text: str) -> dict[str, dict]:
-        """Minimal parser used only if PyYAML is unavailable/broken."""
+        """Minimal parser used only if PyYAML is unavailable/broken.
+
+        Indentation-relative rather than fixed-width: `models:` may sit at any
+        depth, and its children are derived from it. (A fixed 4/6/8/10 layout
+        silently returns nothing for the common 2-space style.)
+        """
         out: dict[str, dict] = {}
         lines = text.splitlines()
-        start = None
-        for i, line in enumerate(lines):
-            if re.match(r"^provider_routing:\s*$", line):
-                start = i
-                break
+        start = next((i for i, l in enumerate(lines) if re.match(r"^provider_routing:\s*$", l)), None)
         if start is None:
             return out
+        models_indent = None
         cur_model = None
         cur_key = None
         for line in lines[start + 1:]:
-            if line and not line[0].isspace():
-                break  # end of provider_routing block
+            if not line.strip():
+                continue
+            if not line[0].isspace():
+                break  # end of the provider_routing block
             stripped = line.strip()
             indent = len(line) - len(line.lstrip())
-            if indent == 4 and stripped == "models:":
+            if stripped == "models:":
+                models_indent = indent
                 continue
-            if indent == 6 and stripped.endswith(":") and not stripped.startswith("-"):
-                cur_model = stripped[:-1].strip().strip('"')
+            if models_indent is None:
+                continue
+            if indent == models_indent + 2 and not stripped.startswith("- "):
+                cur_model = stripped.rstrip(":").strip().strip('"').strip("'")
                 out.setdefault(cur_model, {})
                 cur_key = None
                 continue
-            if indent == 8 and stripped.endswith(":") and cur_model:
-                cur_key = stripped[:-1].strip()
-                out[cur_model][cur_key] = [] if cur_key in ("only", "ignore", "order") else None
+            if cur_model and indent == models_indent + 4 and not stripped.startswith("- "):
+                if stripped.endswith(":"):
+                    cur_key = stripped.rstrip(":").strip()
+                    out[cur_model][cur_key] = [] if cur_key in ("only", "ignore", "order") else None
+                elif ":" in stripped:
+                    k, v = stripped.split(":", 1)
+                    out[cur_model][k.strip()] = v.strip().strip('"').strip("'") in ("true", "True", "yes")
                 continue
-            if indent >= 10 and stripped.startswith("- ") and cur_model and cur_key:
+            if cur_model and cur_key and indent >= models_indent + 6 and stripped.startswith("- "):
                 val = stripped[2:].strip().strip('"').strip("'")
                 if isinstance(out[cur_model].get(cur_key), list):
                     out[cur_model][cur_key].append(val)
-                continue
-            if indent == 8 and ":" in stripped and cur_model:
-                k, v = stripped.split(":", 1)
-                v = v.strip()
-                if v:
-                    out[cur_model][k.strip()] = v.strip('"').strip("'") in ("true", "True", "yes")
         return {m: c for m, c in out.items() if any(k in c for k in ("only", "order"))}
 
     def get(self, model: str) -> dict | None:

@@ -1,0 +1,93 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Byte-compile
+        run: python -m py_compile gateway.py
+
+      - name: Import module (no server start)
+        run: python -c "import gateway; print('import ok')"
+
+      - name: Routing table parses and reloads on change
+        run: |
+          python - <<'PY'
+          import json, os, tempfile, time
+          import gateway
+
+          path = os.path.join(tempfile.mkdtemp(), "routing.json")
+          def write(order):
+              json.dump({"some/model": {"only": [order], "order": [order]}}, open(path, "w"))
+
+          write("a/fp8")
+          rt = gateway.RoutingTable(path)
+          assert rt.get("some/model")["order"] == ["a/fp8"], rt.get("some/model")
+          assert rt.get("unknown/model") is None
+
+          time.sleep(0.01)
+          write("b/fp8")
+          assert rt.get("some/model")["order"] == ["b/fp8"], "did not pick up the edit"
+
+          # a Hermes-style config.yaml is understood too
+          cfg = os.path.join(tempfile.mkdtemp(), "config.yaml")
+          open(cfg, "w").write(
+              "provider_routing:\n"
+              "  models:\n"
+              "    some/model:\n"
+              "      order:\n"
+              "        - c/fp8\n"
+              "      only:\n"
+              "        - c/fp8\n"
+          )
+          assert gateway.RoutingTable(cfg).get("some/model")["order"] == ["c/fp8"]
+          print("routing ok")
+          PY
+
+      - name: YAML fallback parser (no PyYAML) handles 2-space configs
+        run: |
+          python - <<'PY'
+          import gateway
+          text = (
+              "model:\n"
+              "  default: x\n"
+              "provider_routing:\n"
+              "  models:\n"
+              "    some/model:\n"
+              "      order:\n"
+              "        - a/fp8\n"
+              "        - b/fp8\n"
+              "      only:\n"
+              "        - a/fp8\n"
+              "        - b/fp8\n"
+              "session_reset:\n"
+              "  mode: none\n"
+          )
+          got = gateway.RoutingTable._parse_fallback(text)
+          assert got == {"some/model": {"order": ["a/fp8", "b/fp8"],
+                                        "only": ["a/fp8", "b/fp8"]}}, got
+          print("fallback parser ok")
+          PY
+
+      - name: Streaming framing uses chunked encoding
+        run: |
+          python - <<'PY'
+          import inspect, gateway
+          src = inspect.getsource(gateway.Handler._relay_stream)
+          assert "Transfer-Encoding" in src and "chunked" in src
+          print("streaming framing ok")
+          PY
