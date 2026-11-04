@@ -257,6 +257,22 @@ class RoutingTable:
         self.get(DEFAULT_MODEL)  # force refresh if stale
         return sorted(self._map)
 
+    def resolve(self, name: str) -> str:
+        """Map a client-supplied model id onto a routing-table key.
+
+        Clients routinely send the bare slug (`deepseek-v4.1-flash-1017`)
+        while the table is keyed by the fully-qualified id
+        (`deepseek/deepseek-v4.1-flash-1017`). A miss here silently drops the
+        `provider` block and lets OpenRouter pick any upstream, so match on the
+        last path segment too. Ambiguous matches are left untouched.
+        """
+        self.get(DEFAULT_MODEL)  # force refresh if stale
+        if not name or name in self._map:
+            return name
+        want = name.strip().lower()
+        hits = [k for k in self._map if k.rsplit("/", 1)[-1].lower() == want]
+        return hits[0] if len(hits) == 1 else name
+
 
 ROUTING = RoutingTable(CONFIG_PATH)
 
@@ -374,7 +390,9 @@ BINDER = Binder()
 def resolve_model(requested: str | None) -> str:
     if not requested or requested in ("default", "auto"):
         return DEFAULT_MODEL
-    return requested
+    # Normalise bare slugs onto the routing table's fully-qualified ids so the
+    # provider whitelist is never silently skipped.
+    return ROUTING.resolve(str(requested).strip())
 
 
 # ------------------------------------------------------------------------ handler
